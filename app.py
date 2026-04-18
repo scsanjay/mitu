@@ -2,8 +2,14 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import os
+import json
+import datetime
 from analyzer import analyze_stock
 from streamlit_cookies_manager import CookieManager
+from kiteconnect import KiteConnect
+from dotenv import load_dotenv
+
+load_dotenv()
 
 st.set_page_config(page_title="MITU - Stock Analysis", layout="wide")
 
@@ -15,6 +21,12 @@ if not cookies.ready():
 # Initialize Session State for results
 if 'results' not in st.session_state:
     st.session_state.results = None
+
+# Reliable Toast Handler (Shows toasts after rerun)
+if "pending_toast" in st.session_state:
+    toast_data = st.session_state.pending_toast
+    st.toast(toast_data["msg"], icon=toast_data.get("icon"))
+    del st.session_state.pending_toast
 
 # Inject CSS for uppercase text area and layout styling
 st.markdown("""
@@ -67,18 +79,210 @@ def load_portfolio():
     return "RELIANCE.NS\nTCS.NS"
 
 
-# Priority-based ticker loading (1. URL, 2. Cookie, 3. Txt file)
+def load_from_zerodha_csv():
+    """Fallback to load tickers from the locally saved Zerodha holdings CSV."""
+    if os.path.exists("zerodha_holdings.csv"):
+        try:
+            df = pd.read_csv("zerodha_holdings.csv")
+            if "tradingsymbol" in df.columns and "exchange" in df.columns:
+                formatted = []
+                for _, row in df.iterrows():
+                    sym = row["tradingsymbol"]
+                    exch = row["exchange"]
+                    suffix = ".NS" if exch == "NSE" else (".BO" if exch == "BSE" else "")
+                    formatted.append(f"{sym}{suffix}")
+                return "\n".join(formatted)
+        except Exception:
+            pass
+    return None
+
+
+# Priority-based ticker loading (1. URL, 2. Cookie, 3. Zerodha CSV, 4. Txt file)
 if "tickers_input_state" not in st.session_state:
     url_params = st.query_params.get("tickers")
     cookie_tickers = cookies.get("saved_tickers")
+    zerodha_tickers = load_from_zerodha_csv()
     
-    if url_params:
+    if zerodha_tickers:
+        initial_val = zerodha_tickers
+    elif url_params:
         initial_val = url_params.replace(',', '\n')
     elif cookie_tickers:
         initial_val = cookie_tickers
     else:
         initial_val = load_portfolio()
     st.session_state.tickers_input_state = initial_val
+
+# Zerodha Integration Logic
+API_KEY = os.getenv("KITE_API_KEY")
+API_SECRET = os.getenv("KITE_API_SECRET")
+
+if API_KEY and API_SECRET:
+    kite = KiteConnect(api_key=API_KEY)
+    
+    # Check for callback from Zerodha
+    if "request_token" in st.query_params:
+        request_token = st.query_params.get("request_token")
+        st.info(f"Detected Zerodha callback. Exchanging token...")
+        try:
+            data = kite.generate_session(request_token, api_secret=API_SECRET)
+            token = data["access_token"]
+            st.session_state.access_token = token
+            
+            # Save token to meta_info.json for persistent session
+            meta = {}
+            if os.path.exists("meta_info.json"):
+                try:
+                    with open("meta_info.json", "r") as f:
+                        meta = json.load(f)
+                except Exception: pass
+            meta["access_token"] = token
+            with open("meta_info.json", "w") as f:
+                json.dump(meta, f, indent=4)
+            
+            st.query_params.clear() # Clear token from URL
+            st.session_state.pending_toast = {"msg": "✅ Authenticated with Zerodha!", "icon": "🚀"}
+            st.rerun()
+        except Exception as e:
+            st.error(f"Zerodha Authentication Failed: {e}")
+            if "request_token" in st.query_params:
+                st.query_params.clear()
+
+    # Load access token from meta_info.json if available
+    if "access_token" not in st.session_state:
+        if os.path.exists("meta_info.json"):
+            try:
+                with open("meta_info.json", "r") as f:
+                    meta = json.load(f)
+                    if "access_token" in meta:
+                        st.session_state.access_token = meta["access_token"]
+            except Exception: pass
+
+    # Zerodha UI Section
+    col_kite, col_logout, col_empty = st.columns([1, 1, 2])
+    with col_kite:
+        if "access_token" not in st.session_state:
+            login_url = kite.login_url()
+            st.link_button("🔑 Login with Zerodha", login_url, help="Click to authorize Zerodha access", use_container_width=True)
+        else:
+            if st.button("🔄 Fetch Zerodha Holdings", help="Pull your current holdings from Zerodha", use_container_width=True):
+                try:
+                    kite.set_access_token(st.session_state.access_token)
+                    holdings = kite.holdings()
+                    if holdings:
+                        df_holdings = pd.DataFrame(holdings)
+                        df_holdings.to_csv("zerodha_holdings.csv", index=False)
+                        
+                        # Map exchange to suffix (NSE -> .NS, BSE -> .BO)
+                        formatted_tickers = []
+                        for h in holdings:
+                            symbol = h.get('tradingsymbol', '')
+                            exch = h.get('exchange', 'NSE')
+                            suffix = ".NS" if exch == "NSE" else (".BO" if exch == "BSE" else "")
+                            formatted_tickers.append(f"{symbol}{suffix}")
+                        
+                        st.session_state.tickers_input_state = "\n".join(formatted_tickers)
+                        
+                        # Calculate portfolio summary
+                        invested = sum(h.get("average_price", 0) * h.get("quantity", 0) for h in holdings)
+                        current = sum(h.get("last_price", 0) * h.get("quantity", 0) for h in holdings)
+                        total_pnl = sum(h.get("pnl", 0) for h in holdings)
+                        
+                        # Maintain meta_info.json
+                        meta_info = {
+                            "last_fetched": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "source": "Zerodha",
+                            "count": len(holdings),
+                            "invested_value": round(invested, 2),
+                            "current_value": round(current, 2),
+                            "pnl": round(total_pnl, 2),
+                            "access_token": st.session_state.access_token # Keep token
+                        }
+                        with open("meta_info.json", "w") as f:
+                            json.dump(meta_info, f, indent=4)
+                            
+                        st.session_state.pending_toast = {
+                            "msg": f"Last updated from Zerodha: {meta_info['last_fetched']} ({len(holdings)} tickers)",
+                            "icon": "✅"
+                        }
+                        st.rerun()
+                    else:
+                        st.info("No holdings found in your Zerodha account.")
+                except Exception as e:
+                    if "TokenException" in str(e) or "403" in str(e):
+                        if "access_token" in st.session_state:
+                            del st.session_state.access_token
+                        
+                        # Remove token from meta_info.json
+                        if os.path.exists("meta_info.json"):
+                            try:
+                                with open("meta_info.json", "r") as f:
+                                    meta = json.load(f)
+                                meta.pop("access_token", None)
+                                with open("meta_info.json", "w") as f:
+                                    json.dump(meta, f, indent=4)
+                            except Exception: pass
+                            
+                        st.warning("Session expired. Please login again.")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to fetch holdings: {e}")
+
+    with col_logout:
+        if "access_token" in st.session_state:
+            if st.button("🚪 Logout", help="Clear Zerodha session", use_container_width=True):
+                # Remove from meta_info.json
+                if os.path.exists("meta_info.json"):
+                    try:
+                        with open("meta_info.json", "r") as f:
+                            meta = json.load(f)
+                        meta.pop("access_token", None)
+                        with open("meta_info.json", "w") as f:
+                            json.dump(meta, f, indent=4)
+                    except Exception: pass
+                
+                if "access_token" in st.session_state:
+                    del st.session_state.access_token
+                st.session_state.pending_toast = {"msg": "Logged out successfully"}
+                st.rerun()
+
+    # Display Last Fetch info & Portfolio Summary
+    if os.path.exists("meta_info.json"):
+        try:
+            with open("meta_info.json", "r") as f:
+                meta = json.load(f)
+            
+            if "invested_value" in meta:
+                st.markdown("---")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Holdings", f"{meta.get('count')}")
+                m2.metric("Invested", f"₹{meta.get('invested_value'):,.2f}")
+                m3.metric("Current", f"₹{meta.get('current_value'):,.2f}")
+                
+                pnl_val = meta.get('pnl', 0)
+                inv_val = meta.get('invested_value', 1)
+                pnl_pct = (pnl_val / inv_val) * 100
+                m4.metric("Total P&L", f"₹{pnl_val:,.2f}", delta=f"{pnl_pct:.2f}%")
+            
+            if "invested_value" in meta:
+                st.markdown("---")
+        except Exception:
+            pass
+
+    # Load zerodha holdings for lookup
+    holding_map = {}
+    if os.path.exists("zerodha_holdings.csv"):
+        try:
+            df_h = pd.read_csv("zerodha_holdings.csv")
+            for _, row in df_h.iterrows():
+                holding_map[row["tradingsymbol"]] = {
+                    "qty": row["quantity"],
+                    "avg": row["average_price"],
+                    "ltp": row["last_price"],
+                    "pnl": row["pnl"]
+                }
+        except Exception:
+            pass
 
 st.markdown("##### Enter Stock Tickers (comma or newline separated):")
 tickers_input = st.text_area("Tickers", key="tickers_input_state", label_visibility="collapsed", height=150)
@@ -231,6 +435,33 @@ if st.session_state.results:
             """
             st.markdown(heading_html, unsafe_allow_html=True)
             
+            # --- Show Zerodha Position Details if available ---
+            base_ticker = ticker.split('.')[0]
+            pos = holding_map.get(base_ticker) or holding_map.get(ticker)
+            if pos:
+                qty = pos['qty']
+                avg = pos['avg']
+                curr_p = pos['ltp']
+                inv_amt = qty * avg
+                cur_amt = qty * curr_p
+                pnl = pos['pnl']
+                pnl_pct = (pnl / inv_amt * 100) if inv_amt else 0
+                pnl_color = "green" if pnl >= 0 else "red"
+                
+                # Using a distinct themed card for position
+                pos_html = f"""
+                <div style='background-color: rgba(67, 79, 107, 0.2); border: 1px dashed #475569; border-radius: 10px; padding: 12px; margin-bottom: 20px;'>
+                    <div style='display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;'>
+                        <div><small style='color: #888; text-transform: uppercase;'>Qty</small><br><b>{qty}</b></div>
+                        <div><small style='color: #888; text-transform: uppercase;'>Avg. Price</small><br>₹{avg:,.2f}</div>
+                        <div><small style='color: #888; text-transform: uppercase;'>Invested</small><br>₹{inv_amt:,.2f}</div>
+                        <div><small style='color: #888; text-transform: uppercase;'>Current Value</small><br>₹{cur_amt:,.2f}</div>
+                        <div><small style='color: #888; text-transform: uppercase;'>P&L</small><br><span style='color: {pnl_color}; font-weight: bold;'>₹{pnl:,.2f} ({pnl_pct:+.2f}%)</span></div>
+                    </div>
+                </div>
+                """
+                st.markdown(pos_html, unsafe_allow_html=True)
+            
             # Trailing Returns
             trailing = res.get('trailing_returns', {})
             if trailing:
@@ -242,7 +473,57 @@ if st.session_state.results:
                             st.markdown(f"<div style='text-align: center; margin-bottom: 15px'><b>{label}</b><br/><span style='color:{color}'>{pct:+.2f}%</span></div>", unsafe_allow_html=True)
                         else:
                             st.markdown(f"<div style='text-align: center; margin-bottom: 15px'><b>{label}</b><br/>N/A</div>", unsafe_allow_html=True)
-                            
+
+            # Chart (Moved outside expander)
+            hist = res['history']
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=hist['Close'], 
+                mode='lines', name='Price',
+                line=dict(color='#89F336'),
+                hovertemplate='Price: ₹%{y:,.2f}<extra></extra>'
+            ))
+            colors = ['#00d4ff', '#ff8c00', '#ffd700', '#ff4500']
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=hist['EMA_20'], 
+                mode='lines', name='EMA 20', 
+                line=dict(color=colors[0], width=1.5),
+                hovertemplate='EMA 20: ₹%{y:,.2f}<extra></extra>'
+            ))
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=hist['EMA_50'], 
+                mode='lines', name='EMA 50', 
+                line=dict(color=colors[1], width=1.5),
+                hovertemplate='EMA 50: ₹%{y:,.2f}<extra></extra>'
+            ))
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=hist['SMA_100'], 
+                mode='lines', name='SMA 100', 
+                line=dict(color=colors[2], width=1.5),
+                hovertemplate='SMA 100: ₹%{y:,.2f}<extra></extra>'
+            ))
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=hist['SMA_200'], 
+                mode='lines', name='SMA 200', 
+                line=dict(color=colors[3], width=1.5),
+                hovertemplate='SMA 200: ₹%{y:,.2f}<extra></extra>'
+            ))
+            fig.update_layout(
+                title=f"{ticker} - 1 Year Price Chart",
+                xaxis_title="Date",
+                yaxis_title="Price",
+                height=450,
+                hovermode='x unified',
+                hoverlabel=dict(
+                    bgcolor="rgba(43, 49, 62, 0.9)",
+                    font_size=13,
+                    font_family="Inter, sans-serif"
+                ),
+                margin=dict(l=0, r=0, t=50, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
             with st.expander(f"View Detailed Analysis for {ticker}", expanded=False):
                 # Display sub-scores
                 sc1, sc2, sc3 = st.columns(3)
@@ -398,59 +679,7 @@ if st.session_state.results:
 
 
                     
-                # Chart
-                hist = res['history']
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist['Close'], 
-                    mode='lines', name='Price',
-                    line=dict(color='#89F336'),
-                    hovertemplate='Price: ₹%{y:,.2f}<extra></extra>'
-                ))
-                colors = ['#00d4ff', '#ff8c00', '#ffd700', '#ff4500'] # Cyan, DarkOrange, Gold, OrangeRed
-                
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist['EMA_20'], 
-                    mode='lines', name='EMA 20', 
-                    line=dict(color=colors[0], width=1.5),
-                    hovertemplate='EMA 20: ₹%{y:,.2f}<extra></extra>'
-                ))
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist['EMA_50'], 
-                    mode='lines', name='EMA 50', 
-                    line=dict(color=colors[1], width=1.5),
-                    hovertemplate='EMA 50: ₹%{y:,.2f}<extra></extra>'
-                ))
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist['SMA_100'], 
-                    mode='lines', name='SMA 100', 
-                    line=dict(color=colors[2], width=1.5),
-                    hovertemplate='SMA 100: ₹%{y:,.2f}<extra></extra>'
-                ))
-                fig.add_trace(go.Scatter(
-                    x=hist.index, y=hist['SMA_200'], 
-                    mode='lines', name='SMA 200', 
-                    line=dict(color=colors[3], width=1.5),
-                    hovertemplate='SMA 200: ₹%{y:,.2f}<extra></extra>'
-                ))
-                
-                fig.update_layout(
-                    title=f"{ticker} - 1 Year Price Chart",
-                    xaxis_title="Date",
-                    yaxis_title="Price",
-                    height=450,
-                    hovermode='x unified',
-                    hoverlabel=dict(
-                        bgcolor="rgba(43, 49, 62, 0.9)",
-                        font_size=13,
-                        font_family="Inter, sans-serif"
-                    ),
-                    margin=dict(l=0, r=0, t=50, b=0),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
+                        
                 st.markdown("---")
                 
                 # Bottom Section: Recommendations | News

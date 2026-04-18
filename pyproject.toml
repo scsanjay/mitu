@@ -5,9 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "kiteconnect>=5.1.0",
     "matplotlib>=3.10.8",
     "pandas>=3.0.2",
     "plotly>=6.7.0",
+    "python-dotenv>=1.2.2",
     "streamlit>=1.56.0",
     "streamlit-cookies-manager>=0.2.0",
     "ta>=0.11.0",
