@@ -1,6 +1,6 @@
 # MITU Stock Analysis Engine
 
-MITU (Manage Investment Terminal Utility) is a comprehensive stock analysis tool designed to provide data-driven insights into stock health, momentum, and sentiment. It leverages technical indicators, fundamental data, and market sentiment to help investors make informed decisions.
+MITU (Market Insights Tracking Utility) is a comprehensive stock analysis tool designed to provide data-driven insights into stock health, momentum, and sentiment. It leverages technical indicators, fundamental data, and market sentiment to help investors make informed decisions.
 
 ## Features
 

@@ -4,8 +4,8 @@ import ta
 import numpy as np
 
 # Scoring Thresholds
-HOLD_THRESHOLD = 65
-WARNING_THRESHOLD = 45
+HOLD_THRESHOLD = 70
+WARNING_THRESHOLD = 50
 
 # Sector PE benchmarks
 SECTOR_PE_BENCHMARKS = {
@@ -40,43 +40,51 @@ SECTOR_DE_BENCHMARKS = {
     "default":              0.8,
 }
 
-def calculate_predictive_trend_score(returns: dict, weights: dict = None) -> dict:
+def calculate_predictive_trend_score(returns: dict, raw_returns: dict = None, weights: dict = None) -> dict:
     """
     Calculates a 0-100 trend score predicting performance over the next 2-3 months.
+    raw_returns: the original returns dict BEFORE None->0 defaulting, used for confidence.
     """
     default_weights = {
-        'short_momentum': 0.40,
-        'acceleration':   0.30,
-        'consistency':    0.20,
-        'reversion':      0.10
+        'short_momentum': 0.30,
+        'acceleration':   0.25,
+        'consistency':    0.25,
+        'reversion':      0.20
     }
     w = weights if weights else default_weights
 
     if abs(sum(w.values()) - 1.0) > 1e-6:
         raise ValueError(f"Weights must sum to 1.0, got {sum(w.values()):.3f}")
 
-    r = {k: returns.get(k, 0.0) for k in ['3D', '1W', '2W', '1M', '2M', '3M', '6M', '1Y']}
+    # Track which periods had real data for confidence
+    all_keys = ['3D', '1W', '2W', '1M', '2M', '3M', '6M', '1Y']
+    important_keys = ['1M', '2M', '3M', '6M']  # critical for 3-6 month prediction
+    raw = raw_returns if raw_returns else returns
+    data_available = sum(1 for k in all_keys if raw.get(k) is not None)
+    important_available = sum(1 for k in important_keys if raw.get(k) is not None)
+
+    r = {k: returns.get(k, 0.0) for k in all_keys}
     
     # default to 0.0 if None
     for k in r:
         if r[k] is None:
             r[k] = 0.0
 
-    # 1. Short-Term Momentum (40%)
-    short_mom = (r['3D'] + r['1W'] + r['2W'] + r['1M']) / 4
+    # 1. Short-Term Momentum (30%)
+    short_mom = (r['2W'] + r['1M'] + r['2M'] + r['3M']) / 4
     short_score = max(0, min(100, 50 + (short_mom * (50 / 15))))
 
-    # 2. Momentum Acceleration (30%)
+    # 2. Momentum Acceleration (25%)
     med_avg = (r['2M'] + r['3M']) / 2
     acceleration = r['1M'] - med_avg
     accel_score = max(0, min(100, 50 + (acceleration * (50 / 20))))
 
-    # 3. Trend Consistency (20%)
+    # 3. Trend Consistency (25%)
     periods = [r['3D'], r['1W'], r['2W'], r['1M'], r['2M'], r['3M'], r['6M'], r['1Y']]
     consistency_ratio = sum(1 for p in periods if p > 0) / len(periods)
     consist_score = consistency_ratio * 100
 
-    # 4. Mean Reversion Potential (10%)
+    # 4. Mean Reversion Potential (20%)
     long_drop = (r['6M'] + r['1Y']) / 2
     reversion_ratio = max(0, min(1, -long_drop / 30))
     reversion_score = reversion_ratio * 100
@@ -96,9 +104,19 @@ def calculate_predictive_trend_score(returns: dict, weights: dict = None) -> dic
     elif final_score >= 25: rating = "Moderately Bearish 🟠"
     else:                   rating = "Strong Bearish 🔴"
 
+    # Confidence: HIGH if >=6 periods available AND all 4 important ones present
+    # MEDIUM if >=4 periods and >=2 important, LOW otherwise
+    if data_available >= 6 and important_available >= 3:
+        confidence = "HIGH"
+    elif data_available >= 4 and important_available >= 2:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
     return {
         "score": final_score,
         "rating": rating,
+        "confidence": confidence,
         "components": {
             "short_term_momentum":   round(short_score, 1),
             "momentum_acceleration": round(accel_score, 1),
@@ -396,7 +414,7 @@ def score_52w(range_pos, pct_from_high):
 
 def score_technicals_v2(df):
     """
-    Redesigned technical score — 40 point scale
+    Redesigned technical score — 0-100 scale.
     Weighted scoring based on medium-term (6-12 month) holding logic.
     Components: MA Stack (30%), MACD (25%), RSI (20%), Volume (15%), 52W (10%)
     """
@@ -589,13 +607,28 @@ def score_technicals_v2(df):
     total_weight = sum(w for _, w, _ in checks)
     weighted_sum = sum(s * w for s, w, _ in checks)
     raw_100  = weighted_sum / total_weight          # 0-100 internal
-    final_score  = round(raw_100 * 40 / 100)        # scale to 0-40
+    final_score  = round(raw_100)                   # stay on 0-100 scale
 
     # ATR stop-loss suggestion (informational, doesn't affect score)
     atr = latest["ATR14"]
     signals["Stop_Loss"] = f"ℹ️  Suggested stop-loss: ₹{price - 2*atr:.1f} (2x ATR)"
 
-    return final_score, signals
+    # Confidence: all 5 components (MA, MACD, RSI, Volume, 52W) are always present
+    # from the DataFrame, so confidence is based on indicator quality
+    num_checks = len(checks)
+    # Check if key indicators have reasonable (non-NaN) values
+    has_valid_sma200 = pd.notna(sma200)
+    has_valid_rsi = pd.notna(latest["RSI"])
+    has_valid_macd = pd.notna(latest["MACD"])
+
+    if num_checks >= 5 and has_valid_sma200 and has_valid_rsi and has_valid_macd:
+        confidence = "HIGH"
+    elif num_checks >= 3 and (has_valid_sma200 or has_valid_rsi):
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
+    return final_score, signals, confidence
 
 
 
@@ -1678,8 +1711,8 @@ def analyze_stock(ticker: str) -> dict:
         range_span = rolling_high - rolling_low
         hist['52W_Pos'] = np.where(range_span > 0, (hist['Close'] - rolling_low) / range_span * 100, 50)
 
-        # Score technicals using v2 weighted scoring (returns 0-40)
-        tech_score, tech_signals = score_technicals_v2(hist)
+        # Score technicals using v2 weighted scoring (returns 0-100)
+        tech_score, tech_signals, tech_confidence = score_technicals_v2(hist)
 
         # --- 2. Fundamental Analysis (Max 40 points via score_fundamentals_v2) ---
         pe_ratio = info.get('trailingPE')
@@ -1717,8 +1750,8 @@ def analyze_stock(ticker: str) -> dict:
         raw_fund_score, fund_signals, fund_confidence = score_fundamentals_v2(
             fund_stock_data, buy_price=None
         )
-        # Scale 0-100 → 0-40
-        fund_score = (raw_fund_score / 100) * 40
+        # Keep on 0-100 scale
+        fund_score = raw_fund_score
 
         # --- 3. Sentiment Analysis (Max 20 points) ---
         sent_score = 0
@@ -1792,7 +1825,7 @@ def analyze_stock(ticker: str) -> dict:
             '6M': trailing_returns.get('6 Months'),
             '1Y': trailing_returns.get('1 Year'),
         }
-        predictive_trend = calculate_predictive_trend_score(pred_map)
+        predictive_trend = calculate_predictive_trend_score(pred_map, raw_returns=pred_map)
             
         # Collect data for v2 sentiment score
         target_mean = info.get('targetMeanPrice')
@@ -1824,11 +1857,11 @@ def analyze_stock(ticker: str) -> dict:
         }
 
         raw_sent_score, sentiment_signals, confidence = score_sentiment_v2(stock_data)
-        # score_sentiment_v2 returns a score out of 100, scale it to 20
-        sent_score = (raw_sent_score / 100.0) * 20
+        # Keep on 0-100 scale
+        sent_score = raw_sent_score
             
-        # --- Final Scoring ---
-        total_score = round(tech_score + fund_score + sent_score)
+        # --- Final Scoring (Tech 50% + Fund 35% + Sent 15%) ---
+        total_score = round(tech_score * 0.50 + fund_score * 0.35 + sent_score * 0.15)
         
         if total_score >= HOLD_THRESHOLD:
             classification = "Hold"
@@ -1878,7 +1911,10 @@ def analyze_stock(ticker: str) -> dict:
             "tech_score": int(round(tech_score)),
             "fund_score": int(round(fund_score)),
             "sent_score": int(round(sent_score)),
+            "tech_confidence": tech_confidence,
+            "fund_confidence": fund_confidence,
             "sentiment_confidence": confidence,
+            "trend_confidence": predictive_trend.get("confidence", "LOW"),
             "price": current_price,
             "ema_20": ema_20,
             "ema_50": ema_50,
@@ -1916,7 +1952,6 @@ def analyze_stock(ticker: str) -> dict:
             "sentiment_signals": sentiment_signals,
             "tech_signals": tech_signals,
             "fund_signals": fund_signals,
-            "fund_confidence": fund_confidence,
             "tech_commentary": tech_commentary,
             "fund_commentary": fund_commentary,
             "history": hist

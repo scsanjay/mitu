@@ -64,7 +64,7 @@ span[data-baseweb="tag"] svg {
     fill: white !important;
 }
 </style>
-<h1 style='color: #E75480; text-align: center;' >MITU — Manage Investment Terminal Utility</h1>
+<h1 style='color: #E75480; text-align: center;' >MITU — Market Insights Tracking Utility</h1>
 """, unsafe_allow_html=True)
 # st.markdown("Analyze medium-term stock outlooks.")
 
@@ -103,10 +103,10 @@ if "tickers_input_state" not in st.session_state:
     cookie_tickers = cookies.get("saved_tickers")
     zerodha_tickers = load_from_zerodha_csv()
     
-    if zerodha_tickers:
-        initial_val = zerodha_tickers
-    elif url_params:
+    if url_params:
         initial_val = url_params.replace(',', '\n')
+    elif zerodha_tickers:
+        initial_val = zerodha_tickers
     elif cookie_tickers:
         initial_val = cookie_tickers
     else:
@@ -123,7 +123,7 @@ if API_KEY and API_SECRET:
     # Check for callback from Zerodha
     if "request_token" in st.query_params:
         request_token = st.query_params.get("request_token")
-        st.info(f"Detected Zerodha callback. Exchanging token...")
+        st.info(f"Detected Kite callback. Exchanging token...")
         try:
             data = kite.generate_session(request_token, api_secret=API_SECRET)
             token = data["access_token"]
@@ -141,10 +141,10 @@ if API_KEY and API_SECRET:
                 json.dump(meta, f, indent=4)
             
             st.query_params.clear() # Clear token from URL
-            st.session_state.pending_toast = {"msg": "✅ Authenticated with Zerodha!", "icon": "🚀"}
+            st.session_state.pending_toast = {"msg": "✅ Authenticated with Kite!", "icon": "🚀"}
             st.rerun()
         except Exception as e:
-            st.error(f"Zerodha Authentication Failed: {e}")
+            st.error(f"Kite Authentication Failed: {e}")
             if "request_token" in st.query_params:
                 st.query_params.clear()
 
@@ -163,9 +163,9 @@ if API_KEY and API_SECRET:
     with col_kite:
         if "access_token" not in st.session_state:
             login_url = kite.login_url()
-            st.link_button("🔑 Login with Zerodha", login_url, help="Click to authorize Zerodha access", use_container_width=True)
+            st.link_button("🔑 Login with Kite", login_url, help="Click to authorize Kite access", use_container_width=True)
         else:
-            if st.button("🔄 Fetch Zerodha Holdings", help="Pull your current holdings from Zerodha", use_container_width=True):
+            if st.button("🔄 Fetch Kite Holdings", help="Pull your current holdings from Kite", use_container_width=True):
                 try:
                     kite.set_access_token(st.session_state.access_token)
                     holdings = kite.holdings()
@@ -191,7 +191,7 @@ if API_KEY and API_SECRET:
                         # Maintain meta_info.json
                         meta_info = {
                             "last_fetched": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "source": "Zerodha",
+                            "source": "Kite",
                             "count": len(holdings),
                             "invested_value": round(invested, 2),
                             "current_value": round(current, 2),
@@ -202,12 +202,12 @@ if API_KEY and API_SECRET:
                             json.dump(meta_info, f, indent=4)
                             
                         st.session_state.pending_toast = {
-                            "msg": f"Last updated from Zerodha: {meta_info['last_fetched']} ({len(holdings)} tickers)",
+                            "msg": f"Last updated from Kite: {meta_info['last_fetched']} ({len(holdings)} tickers)",
                             "icon": "✅"
                         }
                         st.rerun()
                     else:
-                        st.info("No holdings found in your Zerodha account.")
+                        st.info("No holdings found in your Kite account.")
                 except Exception as e:
                     if "TokenException" in str(e) or "403" in str(e):
                         if "access_token" in st.session_state:
@@ -230,7 +230,7 @@ if API_KEY and API_SECRET:
 
     with col_logout:
         if "access_token" in st.session_state:
-            if st.button("🚪 Logout", help="Clear Zerodha session", use_container_width=True):
+            if st.button("🚪 Logout", help="Clear Kite session", use_container_width=True):
                 # Remove from meta_info.json
                 if os.path.exists("meta_info.json"):
                     try:
@@ -263,7 +263,7 @@ if API_KEY and API_SECRET:
                 inv_val = meta.get('invested_value', 1)
                 pnl_pct = (pnl_val / inv_val) * 100
                 m4.metric("Total P&L", f"₹{pnl_val:,.2f}", delta=f"{pnl_pct:.2f}%")
-            
+                st.caption(f"Last updated from Kite: {meta.get('last_fetched')}")
             if "invested_value" in meta:
                 st.markdown("---")
         except Exception:
@@ -284,8 +284,33 @@ if API_KEY and API_SECRET:
         except Exception:
             pass
 
-st.markdown("##### Enter Stock Tickers (comma or newline separated):")
-tickers_input = st.text_area("Tickers", key="tickers_input_state", label_visibility="collapsed", height=150)
+# Show "Populate from holdings file" button when CSV exists but user is not logged in
+_show_populate_btn = os.path.exists("zerodha_holdings.csv") and "access_token" not in st.session_state
+if _show_populate_btn:
+    _hdr_col, _btn_col = st.columns([3, 1.2])
+    with _hdr_col:
+        st.markdown("##### Enter Stock Tickers (comma or newline separated):")
+    with _btn_col:
+        if st.button("📂 Populate from holdings file", use_container_width=True):
+            csv_tickers = load_from_zerodha_csv()
+            if csv_tickers:
+                st.session_state.tickers_input_state = csv_tickers
+                st.rerun()
+            else:
+                st.toast("Could not read holdings file.", icon="⚠️")
+else:
+    st.markdown("##### Enter Stock Tickers (comma or newline separated):")
+
+tickers_input = st.text_area("You need to enter as per Yahoo Finance Format", key="tickers_input_state", height=150, help="""
+📊 Yahoo Finance Format Guide
+
+🇮🇳 NSE → .NS (RELIANCE.NS, TCS.NS, INFY.NS)  
+🇮🇳 BSE → .BO (500325.BO, 532540.BO, 500209.BO)  
+🇺🇸 US → No suffix (AAPL, MSFT, TSLA)  
+🇬🇧 LSE → .L (VOD.L, HSBA.L, BP.L)  
+🇯🇵 TSE → .T (7203.T, 6758.T, 9984.T)  
+🇭🇰 HKEX → .HK (0700.HK, 9988.HK, 1299.HK)
+    """)
 
 if st.button("Analyze 📊", type="primary"):
     # Clear previous results immediately to avoid showing stale data
@@ -373,8 +398,8 @@ if st.session_state.results:
         and res.get("predictive_trend", {}).get("rating") in filter_trend
     ]
 
-    # Sort filtered results by severity (Sell first)
-    filtered_results.sort(key=lambda x: x["severity"])
+    # Results will appear in the order of input (no sorting)
+    # filtered_results.sort(key=lambda x: x["severity"])
     
     if not filtered_results:
         st.info("No stocks match the selected filters. Try adjusting your selections in the sidebar.")
@@ -420,15 +445,23 @@ if st.session_state.results:
             else:
                 predictive_color = "white"
             
+            tech_conf = res.get('tech_confidence', 'LOW')
+            fund_conf = res.get('fund_confidence', 'LOW')
+            sent_conf = res.get('sentiment_confidence', 'LOW')
+            trend_conf = res.get('trend_confidence', 'LOW')
+            
+            def conf_badge(level):
+                return f"<span style='font-size: 11px; color: #8896ab; border: 1px solid #5a6577; border-radius: 6px; padding: 2px 7px; margin-left: 4px; font-weight: 500; vertical-align: middle;'>Conf: {level}</span>"
+            
             heading_html = f"""
             <div style='margin-bottom: 20px;'>
                 <h3 style='margin-bottom: 12px; margin-top: 0px;'>{ticker}</h3>
                 <div style='display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;'>
                     <span style='background-color: #2b313e; color: {composite_color}; border: 1px solid #475569; border-radius: 14px; padding: 8px 18px; font-size: 16px; font-weight: 600;'>
-                        Composite Score: {res['score']} ({classification}) {color_emoji} — [Tech: {res['tech_score']}, Fund: {res['fund_score']}, Sent: {res['sent_score']}]
+                        COMPOSITE SCORE: {res['score']} ({classification}) {color_emoji} <br>| Tech: {res['tech_score']}{conf_badge(tech_conf)} | Fund: {res['fund_score']}{conf_badge(fund_conf)} | Sent: {res['sent_score']}{conf_badge(sent_conf)} |
                     </span>
                     <span style='background-color: #2b313e; color: {predictive_color}; border: 1px solid #475569; border-radius: 14px; padding: 8px 18px; font-size: 16px; font-weight: 600;'>
-                        Predictive Trend: {pred_rating}
+                        PREDICTIVE TREND: {pred_rating} {conf_badge(trend_conf)}
                     </span>
                 </div>
             </div>
@@ -441,10 +474,10 @@ if st.session_state.results:
             if pos:
                 qty = pos['qty']
                 avg = pos['avg']
-                curr_p = pos['ltp']
+                curr_p = res['price'] # Use real-time price from yfinance
                 inv_amt = qty * avg
                 cur_amt = qty * curr_p
-                pnl = pos['pnl']
+                pnl = cur_amt - inv_amt
                 pnl_pct = (pnl / inv_amt * 100) if inv_amt else 0
                 pnl_color = "green" if pnl >= 0 else "red"
                 
@@ -480,10 +513,10 @@ if st.session_state.results:
             fig.add_trace(go.Scatter(
                 x=hist.index, y=hist['Close'], 
                 mode='lines', name='Price',
-                line=dict(color='#89F336'),
+                line=dict(color='#7CFC00'),
                 hovertemplate='Price: ₹%{y:,.2f}<extra></extra>'
             ))
-            colors = ['#00d4ff', '#ff8c00', '#ffd700', '#ff4500']
+            colors = ['#FFD600', '#FF6D00', '#00E5FF', '#0088FF']
             fig.add_trace(go.Scatter(
                 x=hist.index, y=hist['EMA_20'], 
                 mode='lines', name='EMA 20', 
@@ -525,11 +558,15 @@ if st.session_state.results:
             st.plotly_chart(fig, use_container_width=True)
             
             with st.expander(f"View Detailed Analysis for {ticker}", expanded=False):
-                # Display sub-scores
+                # Display sub-scores with confidence
+                conf_labels = {"HIGH": "🟢 High", "MEDIUM": "🟡 Medium", "LOW": "🔴 Low"}
                 sc1, sc2, sc3 = st.columns(3)
-                sc1.metric("Technical Score", f"{res['tech_score']} / 40")
-                sc2.metric("Fundamental Score", f"{res['fund_score']} / 40")
-                sc3.metric("Sentiment Score", f"{res['sent_score']} / 20")
+                sc1.metric("Technical Score", f"{res['tech_score']} / 100")
+                sc1.caption(f"Confidence: {conf_labels.get(res.get('tech_confidence', 'LOW'))}")
+                sc2.metric("Fundamental Score", f"{res['fund_score']} / 100")
+                sc2.caption(f"Confidence: {conf_labels.get(res.get('fund_confidence', 'LOW'))}")
+                sc3.metric("Sentiment Score", f"{res['sent_score']} / 100")
+                sc3.caption(f"Confidence: {conf_labels.get(res.get('sentiment_confidence', 'LOW'))}")
                 
                 st.markdown("---")
                 
