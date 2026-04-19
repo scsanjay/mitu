@@ -45,11 +45,7 @@ For detailed scoring logic and formulas, see [`metrics.md`](./metrics.md).
 
 ## 📸 Demo
 
-*Add a screenshot or GIF of the dashboard here.*
-
-Example:
-
-`![MITU dashboard](./assets/1.gif)`
+![MITU dashboard](./assets/1.gif)
 
 ---
 
