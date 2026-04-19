@@ -34,6 +34,7 @@ For detailed scoring logic and formulas, see [`metrics.md`](./metrics.md).
 * **Composite score** combining technical, fundamental, and sentiment factors
 * **Predictive trend score** for short- to medium-term direction
 * **Confidence score** indicating data completeness
+* **Filter** stocks based on scores
 * **Interactive charts** for price and indicator analysis
 * **Sector-aware fundamental scoring** with benchmark comparisons
 * **Current value per stock** based on latest market price
