@@ -117,6 +117,9 @@ if "tickers_input_state" not in st.session_state:
 API_KEY = os.getenv("KITE_API_KEY")
 API_SECRET = os.getenv("KITE_API_SECRET")
 
+# Initialize global state for holdings
+holding_map = {}
+
 if API_KEY and API_SECRET:
     kite = KiteConnect(api_key=API_KEY)
     
@@ -246,43 +249,42 @@ if API_KEY and API_SECRET:
                 st.session_state.pending_toast = {"msg": "Logged out successfully"}
                 st.rerun()
 
-    # Display Last Fetch info & Portfolio Summary
-    if os.path.exists("meta_info.json"):
-        try:
-            with open("meta_info.json", "r") as f:
-                meta = json.load(f)
+# Display Last Fetch info & Portfolio Summary (Moved outside API check)
+if os.path.exists("meta_info.json"):
+    try:
+        with open("meta_info.json", "r") as f:
+            meta = json.load(f)
+        
+        if "invested_value" in meta:
+            st.markdown("---")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Holdings", f"{meta.get('count')}")
+            m2.metric("Invested", f"₹{meta.get('invested_value'):,.2f}")
+            m3.metric("Current", f"₹{meta.get('current_value'):,.2f}")
             
-            if "invested_value" in meta:
-                st.markdown("---")
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Holdings", f"{meta.get('count')}")
-                m2.metric("Invested", f"₹{meta.get('invested_value'):,.2f}")
-                m3.metric("Current", f"₹{meta.get('current_value'):,.2f}")
-                
-                pnl_val = meta.get('pnl', 0)
-                inv_val = meta.get('invested_value', 1)
-                pnl_pct = (pnl_val / inv_val) * 100
-                m4.metric("Total P&L", f"₹{pnl_val:,.2f}", delta=f"{pnl_pct:.2f}%")
-                st.caption(f"Last updated from Kite: {meta.get('last_fetched')}")
-            if "invested_value" in meta:
-                st.markdown("---")
-        except Exception:
-            pass
+            pnl_val = meta.get('pnl', 0)
+            inv_val = meta.get('invested_value', 1)
+            pnl_pct = (pnl_val / inv_val) * 100
+            m4.metric("Total P&L", f"₹{pnl_val:,.2f}", delta=f"{pnl_pct:.2f}%")
+            st.caption(f"Last updated from Kite: {meta.get('last_fetched')}")
+        if "invested_value" in meta:
+            st.markdown("---")
+    except Exception:
+        pass
 
-    # Load zerodha holdings for lookup
-    holding_map = {}
-    if os.path.exists("zerodha_holdings.csv"):
-        try:
-            df_h = pd.read_csv("zerodha_holdings.csv")
-            for _, row in df_h.iterrows():
-                holding_map[row["tradingsymbol"]] = {
-                    "qty": row["quantity"],
-                    "avg": row["average_price"],
-                    "ltp": row["last_price"],
-                    "pnl": row["pnl"]
-                }
-        except Exception:
-            pass
+# Load zerodha holdings for lookup (Moved outside API check)
+if os.path.exists("zerodha_holdings.csv"):
+    try:
+        df_h = pd.read_csv("zerodha_holdings.csv")
+        for _, row in df_h.iterrows():
+            holding_map[row["tradingsymbol"]] = {
+                "qty": row["quantity"],
+                "avg": row["average_price"],
+                "ltp": row["last_price"],
+                "pnl": row["pnl"]
+            }
+    except Exception:
+        pass
 
 # Show "Populate from holdings file" button when CSV exists but user is not logged in
 _show_populate_btn = os.path.exists("zerodha_holdings.csv") and "access_token" not in st.session_state
