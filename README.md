@@ -47,6 +47,9 @@ For detailed scoring logic and formulas, see [`metrics.md`](./metrics.md).
 
 ![MITU dashboard](./assets/1.gif)
 
+#### When connected to Zerodha/Kite
+![MITU dashboard](./assets/2.gif)
+
 ---
 
 ## ⚙️ Getting Started
