@@ -13,6 +13,15 @@ It provides a concise yet detailed view of your holdings, breaking down each sto
 
 ---
 
+## 📸 Demo
+
+![MITU dashboard](./assets/1.gif)
+
+#### When connected to Zerodha/Kite
+![MITU dashboard](./assets/2.gif)
+
+---
+
 ## 📖 Overview
 
 MITU provides a composite scoring model with a visual dashboard to evaluate stocks efficiently. It is built for investors who want a clear, practical view of whether a stock appears strong, weak, or uncertain in the near term.
@@ -71,15 +80,6 @@ The **Predictive Trend** score (0–100) provides a directional bias for the nex
 | **Neutral / Mixed** ⚪ | 40 - 59 | Indecisive trend; watchful waiting recommended. |
 | **Moderately Bearish** 🟠 | 25 - 39 | Downward pressure building; momentum fading. |
 | **Strong Bearish** 🔴 | < 25 | High probability of continued downward movement. |
-
----
-
-## 📸 Demo
-
-![MITU dashboard](./assets/1.gif)
-
-#### When connected to Zerodha/Kite
-![MITU dashboard](./assets/2.gif)
 
 ---
 
