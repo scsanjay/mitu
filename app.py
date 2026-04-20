@@ -132,15 +132,15 @@ if API_KEY and API_SECRET:
             token = data["access_token"]
             st.session_state.access_token = token
             
-            # Save token to meta_info.json for persistent session
+            # Save token to kite_info.json for persistent session
             meta = {}
-            if os.path.exists("meta_info.json"):
+            if os.path.exists("kite_info.json"):
                 try:
-                    with open("meta_info.json", "r") as f:
+                    with open("kite_info.json", "r") as f:
                         meta = json.load(f)
                 except Exception: pass
             meta["access_token"] = token
-            with open("meta_info.json", "w") as f:
+            with open("kite_info.json", "w") as f:
                 json.dump(meta, f, indent=4)
             
             st.query_params.clear() # Clear token from URL
@@ -151,11 +151,11 @@ if API_KEY and API_SECRET:
             if "request_token" in st.query_params:
                 st.query_params.clear()
 
-    # Load access token from meta_info.json if available
+    # Load access token from kite_info.json if available
     if "access_token" not in st.session_state:
-        if os.path.exists("meta_info.json"):
+        if os.path.exists("kite_info.json"):
             try:
-                with open("meta_info.json", "r") as f:
+                with open("kite_info.json", "r") as f:
                     meta = json.load(f)
                     if "access_token" in meta:
                         st.session_state.access_token = meta["access_token"]
@@ -191,7 +191,7 @@ if API_KEY and API_SECRET:
                         current = sum(h.get("last_price", 0) * h.get("quantity", 0) for h in holdings)
                         total_pnl = sum(h.get("pnl", 0) for h in holdings)
                         
-                        # Maintain meta_info.json
+                        # Maintain kite_info.json
                         meta_info = {
                             "last_fetched": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "source": "Kite",
@@ -201,7 +201,7 @@ if API_KEY and API_SECRET:
                             "pnl": round(total_pnl, 2),
                             "access_token": st.session_state.access_token # Keep token
                         }
-                        with open("meta_info.json", "w") as f:
+                        with open("kite_info.json", "w") as f:
                             json.dump(meta_info, f, indent=4)
                             
                         st.session_state.pending_toast = {
@@ -216,13 +216,13 @@ if API_KEY and API_SECRET:
                         if "access_token" in st.session_state:
                             del st.session_state.access_token
                         
-                        # Remove token from meta_info.json
-                        if os.path.exists("meta_info.json"):
+                        # Remove token from kite_info.json
+                        if os.path.exists("kite_info.json"):
                             try:
-                                with open("meta_info.json", "r") as f:
+                                with open("kite_info.json", "r") as f:
                                     meta = json.load(f)
                                 meta.pop("access_token", None)
-                                with open("meta_info.json", "w") as f:
+                                with open("kite_info.json", "w") as f:
                                     json.dump(meta, f, indent=4)
                             except Exception: pass
                             
@@ -234,13 +234,13 @@ if API_KEY and API_SECRET:
     with col_logout:
         if "access_token" in st.session_state:
             if st.button("🚪 Logout", help="Clear Kite session", use_container_width=True):
-                # Remove from meta_info.json
-                if os.path.exists("meta_info.json"):
+                # Remove from kite_info.json
+                if os.path.exists("kite_info.json"):
                     try:
-                        with open("meta_info.json", "r") as f:
+                        with open("kite_info.json", "r") as f:
                             meta = json.load(f)
                         meta.pop("access_token", None)
-                        with open("meta_info.json", "w") as f:
+                        with open("kite_info.json", "w") as f:
                             json.dump(meta, f, indent=4)
                     except Exception: pass
                 
@@ -248,11 +248,19 @@ if API_KEY and API_SECRET:
                     del st.session_state.access_token
                 st.session_state.pending_toast = {"msg": "Logged out successfully"}
                 st.rerun()
+        elif os.path.exists("kite_info.json") or os.path.exists("zerodha_holdings.csv"):
+            if st.button("🗑️ Clear Kite Data", help="Delete local Kite info and holdings files", use_container_width=True):
+                if os.path.exists("kite_info.json"):
+                    os.remove("kite_info.json")
+                if os.path.exists("zerodha_holdings.csv"):
+                    os.remove("zerodha_holdings.csv")
+                st.session_state.pending_toast = {"msg": "Local Kite data cleared", "icon": "🗑️"}
+                st.rerun()
 
 # Display Last Fetch info & Portfolio Summary (Moved outside API check)
-if os.path.exists("meta_info.json"):
+if os.path.exists("kite_info.json"):
     try:
-        with open("meta_info.json", "r") as f:
+        with open("kite_info.json", "r") as f:
             meta = json.load(f)
         
         if "invested_value" in meta:

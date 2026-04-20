@@ -44,6 +44,36 @@ For detailed scoring logic and formulas, see [`metrics.md`](./metrics.md).
 
 ---
 
+## 🎯 Intended Use
+
+MITU is primarily designed for analyzing your existing holdings, helping you quickly evaluate portfolio strength, risk exposure, and overall performance at a glance.
+
+### 📊 Scoring Classifications
+
+#### Composite Score Classes
+
+The **Composite Score** (0–100) combines Technical, Fundamental, and Sentiment factors. It determines the primary classification of the stock:
+
+| Class | Range | Description |
+| :--- | :--- | :--- |
+| **Hold** ✅ | 70 - 100 | Constructive price action and healthy metrics. |
+| **Warning** ⚠️ | 50 - 69 | Mixed signals; underlying metrics show weakness or risk. |
+| **Sell** ❌ | < 50 | High risk; trend and/or fundamentals have deteriorated. |
+
+#### Predictive Trend Classes
+
+The **Predictive Trend** score (0–100) provides a directional bias for the next 2-3 months based purely on momentum and consistency:
+
+| Class | Range | Directional Bias |
+| :--- | :--- | :--- |
+| **Strong Bullish** 🟢 | 75 - 100 | Strong momentum; likely continued upward movement. |
+| **Moderately Bullish** 🟢 | 60 - 74 | Positive momentum with steady gain potential. |
+| **Neutral / Mixed** ⚪ | 40 - 59 | Indecisive trend; watchful waiting recommended. |
+| **Moderately Bearish** 🟠 | 25 - 39 | Downward pressure building; momentum fading. |
+| **Strong Bearish** 🔴 | < 25 | High probability of continued downward movement. |
+
+---
+
 ## 📸 Demo
 
 ![MITU dashboard](./assets/1.gif)
